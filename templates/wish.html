@@ -2,509 +2,429 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Happy Birthday {{ recipient }} 🎂</title>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Cinzel:wght@400;600;700&family=Dancing+Script:wght@700&display=swap" rel="stylesheet"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
+<title>Happy Birthday 🎂</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Cinzel:wght@400;600;700&family=Dancing+Script:wght@700&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{
-  background:#0a0008;
-  min-height:100vh;overflow-x:hidden;
-  font-family:'Cormorant Garamond',serif;
-  color:#fff8f9;
-}
+html,body{width:100%;height:100%;overflow:hidden;}
+body{background:#0a0008;}
 #mainCanvas{
-  position:fixed;inset:0;width:100%;height:100%;
+  position:fixed;top:0;left:0;
+  width:100vw;height:100vh;
   display:block;
 }
-/* Photo modal - on top of everything */
 #photoModal{
   display:none;position:fixed;inset:0;z-index:999;
-  background:rgba(0,0,0,.85);
+  background:rgba(0,0,0,.88);
   align-items:center;justify-content:center;
-  backdrop-filter:blur(12px);
-  cursor:pointer;
+  backdrop-filter:blur(14px);cursor:pointer;
 }
 #photoModal.show{display:flex;}
 #photoModal img{
-  max-width:min(88vw,680px);max-height:85vh;
-  border-radius:20px;
-  border:2px solid #c9185b;
+  max-width:min(90vw,700px);max-height:88vh;
+  border-radius:20px;border:2px solid #c9185b;
   box-shadow:0 0 80px rgba(201,24,91,.7),0 0 160px rgba(201,24,91,.3);
   animation:popIn .5s cubic-bezier(.34,1.56,.64,1);
 }
-@keyframes popIn{from{transform:scale(.3) rotate(-5deg);opacity:0}to{transform:scale(1) rotate(0deg);opacity:1}}
+@keyframes popIn{from{transform:scale(.3) rotate(-5deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
 </style>
 </head>
 <body>
 <canvas id="mainCanvas"></canvas>
-
 <div id="photoModal" onclick="this.classList.remove('show')">
   <img id="modalImg" src="" alt="Memory"/>
 </div>
-
 <script>
-const PHOTOS  = {{ photos_json|safe }};
-const MESSAGE = {{ message|tojson }};
+const PHOTOS    = {{ photos_json|safe }};
+const MESSAGE   = {{ message|tojson }};
 const RECIPIENT = {{ recipient|tojson }};
 
 const canvas = document.getElementById('mainCanvas');
 const ctx    = canvas.getContext('2d');
 
 let W, H;
+// Core layout values recomputed on resize
+let ROOT_X, ROOT_Y, TRUNK_L, TITLE_Y, SUB_Y;
+
 function resize(){
   W = canvas.width  = window.innerWidth;
   H = canvas.height = window.innerHeight;
+  // Responsive layout anchors
+  ROOT_X  = W / 2;
+  // Tree root sits at 78% down — leaves start visible above, title fits above
+  ROOT_Y  = H * 0.78;
+  TRUNK_L = Math.min(H * 0.24, W * 0.28);
+  TITLE_Y = H * 0.07;
+  SUB_Y   = H * 0.13;
+  // Rebuild tree on resize
+  treeBuilt = false;
 }
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', ()=>{ resize(); buildTree(); });
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
-const rand  = (a,b) => a + Math.random()*(b-a);
-const lerp  = (a,b,t) => a+(b-a)*t;
-const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+// ── Utils ─────────────────────────────────────────────────────────────────────
+const rand  = (a,b)=>a+Math.random()*(b-a);
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 
-// ── Dust particle system ───────────────────────────────────────────────────────
-// Each dust particle falls from above and "settles" to build the scene
+// ── Dust particles ────────────────────────────────────────────────────────────
 class Dust {
-  constructor(){this.reset(true);}
+  constructor(){ this.reset(true); }
   reset(init=false){
-    this.x = rand(0, W);
-    this.y = init ? rand(-H, 0) : rand(-80,-10);
-    this.vy = rand(0.4, 1.8);
-    this.vx = rand(-0.3, 0.3);
-    this.size = rand(1, 3.5);
-    this.alpha = rand(0.4, 1.0);
-    this.color = `hsl(${rand(300,360)},${rand(60,90)}%,${rand(60,85)}%)`;
-    this.settled = false;
-    this.settleY = rand(H*0.1, H*0.95);
-    this.life = 1;
+    this.x  = rand(0,W);
+    this.y  = init ? rand(-H,0) : rand(-60,-5);
+    this.vy = rand(0.3,1.6);
+    this.vx = rand(-0.3,0.3);
+    this.r  = rand(1,3.2);
+    this.a  = rand(0.35,0.9);
+    this.hue= rand(290,360);
+    this.settled=false;
+    this.settleY=rand(H*0.05,H*0.98);
+    this.life=1;
   }
   update(){
-    if(this.settled){
-      this.life -= 0.008;
-      return;
-    }
-    this.x += this.vx + Math.sin(this.y*0.02)*0.3;
+    if(this.settled){ this.life-=0.007; return; }
+    this.x += this.vx + Math.sin(this.y*0.018)*0.25;
     this.y += this.vy;
-    if(this.y > this.settleY){
-      this.settled = true;
-    }
+    if(this.y>this.settleY) this.settled=true;
   }
   draw(){
     ctx.save();
-    ctx.globalAlpha = this.settled ? this.alpha*this.life : this.alpha*0.7;
+    ctx.globalAlpha = this.settled ? this.a*this.life : this.a*0.65;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI*2);
-    ctx.fillStyle = this.color;
-    ctx.shadowColor = this.color;
-    ctx.shadowBlur = 4;
+    ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
+    const col=`hsl(${this.hue},80%,72%)`;
+    ctx.fillStyle=col;
+    ctx.shadowColor=col;
+    ctx.shadowBlur=5;
     ctx.fill();
     ctx.restore();
   }
 }
+const NDUST=300;
+const dusts=Array.from({length:NDUST},()=>new Dust());
 
-const DUST_COUNT = 280;
-const dusts = Array.from({length:DUST_COUNT}, ()=>new Dust());
+// ── Build progress ────────────────────────────────────────────────────────────
+let buildProgress=0;
+const BUILD_SPEED=0.0022;
 
-// ── Scene build progress (0→1 over ~5 seconds) ────────────────────────────────
-let buildProgress = 0;  // 0 = invisible, 1 = fully built
-const BUILD_SPEED = 0.0025;
+// ── Tree data ─────────────────────────────────────────────────────────────────
+const branches=[], leaves=[], roots=[];
+let treeBuilt=false;
 
-// ── Tree structure ────────────────────────────────────────────────────────────
-const branches = [], leaves = [];
-let treeBuilt = false;
+// Words: "Happy Birthday [name]" always first, then message words
+const nameWords = RECIPIENT ? ['Happy','Birthday',RECIPIENT] : ['Happy','Birthday'];
+const msgWords  = MESSAGE.trim() ? MESSAGE.trim().split(/\s+/).slice(0,17) : [];
+const words     = [...nameWords, ...msgWords].slice(0,20);
 
 function buildTree(){
-  branches.length = 0; leaves.length = 0;
-  const ROOT_X  = W/2;
-  const ROOT_Y  = H * 0.82;
-  const TRUNK_L = H * 0.26;
-  const MAX_D   = 6;
+  branches.length=0; leaves.length=0; roots.length=0;
+  const MAX_D=6;
 
   function grow(x,y,angle,len,depth){
-    if(depth>MAX_D || len<7) return;
-    const rad = angle*Math.PI/180;
-    const x2  = x + Math.cos(rad)*len;
-    const y2  = y - Math.sin(rad)*len;
-    // branch reveal order: deeper branches reveal later
-    branches.push({x1:x,y1:y,x2,y2,depth,len, revealAt: depth/MAX_D});
+    if(depth>MAX_D||len<6) return;
+    const rad=angle*Math.PI/180;
+    const x2=x+Math.cos(rad)*len;
+    const y2=y-Math.sin(rad)*len;
+    branches.push({x1:x,y1:y,x2,y2,depth,revealAt:depth/(MAX_D+1)});
     if(depth===MAX_D){
       leaves.push({
-        cx:x2, cy:y2,
-        baseAngle: angle,
-        phase: rand(0,Math.PI*2),
-        size:  W*0.032 + rand(0,W*0.01),
-        swayAmp:   rand(5,12),
-        swaySpeed: rand(0.5,1.3),
-        revealAt: 0.7 + rand(0,0.28),
+        cx:x2,cy:y2,
+        baseAngle:angle,
+        phase:rand(0,Math.PI*2),
+        size:Math.min(W,H)*0.028+rand(0,Math.min(W,H)*0.01),
+        swayAmp:rand(4,11),
+        swaySpeed:rand(0.5,1.3),
+        revealAt:0.68+rand(0,0.28),
       });
       return;
     }
-    const spread = lerp(30,16, depth/MAX_D);
-    const lm     = rand(0.68,0.78);
-    grow(x2,y2, angle+spread,     len*lm,      depth+1);
-    grow(x2,y2, angle-spread,     len*lm,      depth+1);
-    if(depth<3) grow(x2,y2, angle+spread*0.35, len*lm*0.82, depth+2);
+    const spread=lerp(30,15,depth/MAX_D);
+    const lm=rand(0.68,0.78);
+    grow(x2,y2,angle+spread,len*lm,depth+1);
+    grow(x2,y2,angle-spread,len*lm,depth+1);
+    if(depth<3) grow(x2,y2,angle+spread*0.35,len*lm*0.82,depth+2);
   }
 
-  grow(ROOT_X, ROOT_Y, 90, TRUNK_L, 0);
+  grow(ROOT_X,ROOT_Y,90,TRUNK_L,0);
   for(let i=0;i<5;i++){
-    const bx = ROOT_X + rand(-W*0.02,W*0.02);
-    const by = ROOT_Y - TRUNK_L*(0.35+Math.random()*0.35);
-    const side = Math.random()<.5?1:-1;
-    grow(bx,by, 90+side*rand(22,48), TRUNK_L*rand(0.22,0.36), 3);
+    const by=ROOT_Y-TRUNK_L*(0.35+Math.random()*0.35);
+    const side=Math.random()<.5?1:-1;
+    grow(ROOT_X,by,90+side*rand(22,48),TRUNK_L*rand(0.22,0.36),3);
   }
 
-  // Roots
-  roots.length = 0;
-  if(words.length){
-    words.forEach((w,i)=>{
-      const side = i%2===0?-1:1;
-      const ex   = ROOT_X + side*( (W*0.38/(words.length))*(Math.floor(i/2)+1) );
-      const ey   = ROOT_Y + H*0.10 + (i%3)*H*0.022;
-      roots.push({
-        word:w, sx:ROOT_X, sy:ROOT_Y+H*0.01,
-        ex, ey,
-        progress:0, speed:0.003+rand(0,0.002),
-        done:false, alpha:0,
-        cx1: ROOT_X+(ex-ROOT_X)*0.3 + Math.sin(i*1.7)*W*0.05,
-        cy1: ROOT_Y+H*0.04,
-        cx2: ROOT_X+(ex-ROOT_X)*0.7 + Math.cos(i*2.1)*W*0.04,
-        cy2: ey-H*0.02,
-        delay: i*60,
-        revealAt: 0.85,
-      });
+  // Roots — words in correct order left→right, alternating sides
+  // Sort so left side goes: word0, word2, word4... right side: word1, word3...
+  // Display order matches reading order by using index
+  const rootBaseY = ROOT_Y + H*0.012;
+  const halfW     = W * 0.42;
+  const leftWords  = words.filter((_,i)=>i%2===0);
+  const rightWords = words.filter((_,i)=>i%2===1);
+  // interleave back so left[0],right[0],left[1],right[1]...
+  const orderedWords=[];
+  const maxLen=Math.max(leftWords.length,rightWords.length);
+  for(let i=0;i<maxLen;i++){
+    if(i<leftWords.length)  orderedWords.push({w:leftWords[i], side:-1, rank:i});
+    if(i<rightWords.length) orderedWords.push({w:rightWords[i],side: 1, rank:i});
+  }
+
+  orderedWords.forEach(({w,side,rank},i)=>{
+    const spread = halfW/(Math.max(leftWords.length,rightWords.length)+0.5);
+    const ex = ROOT_X + side*(spread*(rank+1));
+    const ey = rootBaseY + H*0.09 + (rank%3)*H*0.022;
+    const cx1= ROOT_X+(ex-ROOT_X)*0.25+Math.sin(i*1.7)*W*0.04;
+    const cy1= rootBaseY+H*0.035;
+    const cx2= ROOT_X+(ex-ROOT_X)*0.75+Math.cos(i*2.1)*W*0.035;
+    const cy2= ey-H*0.015;
+    roots.push({
+      word:w, sx:ROOT_X, sy:rootBaseY, ex, ey, cx1,cy1,cx2,cy2,
+      progress:0, speed:0.003+rand(0,0.002),
+      done:false, alpha:0,
+      delay: i*50,
+      revealAt: 0.82,
     });
-  }
-}
+  });
 
-// ── Root words ────────────────────────────────────────────────────────────────
-const words = MESSAGE.trim() ? MESSAGE.trim().split(/\s+/).slice(0,20) : [];
-const roots  = [];
+  treeBuilt=true;
+}
+buildTree();
+
+// ── Bezier ────────────────────────────────────────────────────────────────────
+function bezPt(r,t){
+  const mt=1-t;
+  return {
+    x:mt*mt*mt*r.sx+3*mt*mt*t*r.cx1+3*mt*t*t*r.cx2+t*t*t*r.ex,
+    y:mt*mt*mt*r.sy+3*mt*mt*t*r.cy1+3*mt*t*t*r.cy2+t*t*t*r.ey,
+  };
+}
 
 // ── Photo cycling ─────────────────────────────────────────────────────────────
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}}
-let photoQueue = [...Array(PHOTOS.length).keys()];
+let photoQueue=[...Array(PHOTOS.length).keys()];
 shuffle(photoQueue);
-let qIdx = 0;
+let qIdx=0;
+let activeLeafIdx=-1, activePhoto=null, activeAlpha=0, showTimer=0;
+const SHOW_DUR=200;
 
-let activeLeafIdx = -1;
-let activePhoto   = null;
-let activeAlpha   = 0;
-let showTimer     = 0;
-const SHOW_DUR    = 200;
-
-// ── Light beam animation (root → leaf) ───────────────────────────────────────
-let lightBeam = null; // {path:[], t:0, speed, onDone}
-
-function triggerLightBeam(leafIdx, onDone){
+// ── Light beam ────────────────────────────────────────────────────────────────
+let lightBeam=null;
+function triggerLight(leafIdx,onDone){
   if(!leaves[leafIdx]) return onDone();
-  const lf = leaves[leafIdx];
-  // Find root tip (trunk base)
-  const rootX = W/2, rootY = H*0.82;
-  // Build path: root → up trunk → nearest branch end → leaf
-  const path = [
-    {x:rootX, y:rootY + H*0.04},
-    {x:rootX, y:rootY},
-    {x:lerp(rootX,lf.cx,0.4), y:lerp(rootY,lf.cy,0.4)},
-    {x:lerp(rootX,lf.cx,0.75), y:lerp(rootY,lf.cy,0.75)},
-    {x:lf.cx, y:lf.cy},
+  const lf=leaves[leafIdx];
+  const path=[
+    {x:ROOT_X,y:ROOT_Y+H*0.03},
+    {x:ROOT_X,y:ROOT_Y},
+    {x:lerp(ROOT_X,lf.cx,0.35),y:lerp(ROOT_Y,lf.cy,0.35)},
+    {x:lerp(ROOT_X,lf.cx,0.7), y:lerp(ROOT_Y,lf.cy,0.7)},
+    {x:lf.cx,y:lf.cy},
   ];
-  lightBeam = {path, t:0, speed:0.022, onDone, leafIdx};
+  lightBeam={path,t:0,speed:0.02,onDone,leafIdx};
 }
-
-function getLightPos(path, t){
-  const total = path.length-1;
-  const seg   = clamp(t*total,0,total-0.0001);
-  const i     = Math.floor(seg);
-  const f     = seg-i;
-  return {
-    x: lerp(path[i].x, path[i+1].x, f),
-    y: lerp(path[i].y, path[i+1].y, f),
-  };
+function getLightPos(path,t){
+  const total=path.length-1;
+  const seg=clamp(t*total,0,total-0.001);
+  const i=Math.floor(seg),f=seg-i;
+  return {x:lerp(path[i].x,path[i+1].x,f),y:lerp(path[i].y,path[i+1].y,f)};
 }
-
-function drawLightBeam(){
+function drawLight(){
   if(!lightBeam) return;
-  lightBeam.t += lightBeam.speed;
-  if(lightBeam.t >= 1){
-    const cb = lightBeam.onDone;
-    lightBeam = null;
-    cb();
-    return;
-  }
-  const pos = getLightPos(lightBeam.path, lightBeam.t);
-  // Trail
-  const trailLen = 8;
-  for(let i=0;i<trailLen;i++){
-    const tt = Math.max(0, lightBeam.t - i*0.018);
-    const tp = getLightPos(lightBeam.path, tt);
+  lightBeam.t+=lightBeam.speed;
+  if(lightBeam.t>=1){const cb=lightBeam.onDone;lightBeam=null;cb();return;}
+  for(let i=0;i<10;i++){
+    const tt=Math.max(0,lightBeam.t-i*0.016);
+    const tp=getLightPos(lightBeam.path,tt);
     ctx.save();
-    ctx.globalAlpha = (1-i/trailLen)*0.7 * buildProgress;
-    ctx.beginPath();
-    ctx.arc(tp.x, tp.y, 4-i*0.4, 0, Math.PI*2);
-    ctx.fillStyle = '#fff';
-    ctx.shadowColor = '#f48fb1';
-    ctx.shadowBlur = 14;
-    ctx.fill();
-    ctx.restore();
+    ctx.globalAlpha=(1-i/10)*0.75*buildProgress;
+    ctx.beginPath();ctx.arc(tp.x,tp.y,4.5-i*0.4,0,Math.PI*2);
+    ctx.fillStyle='#fff';ctx.shadowColor='#ffaadd';ctx.shadowBlur=18;
+    ctx.fill();ctx.restore();
   }
-  // Head glow
-  ctx.save();
-  ctx.globalAlpha = buildProgress;
-  ctx.beginPath();
-  ctx.arc(pos.x, pos.y, 6, 0, Math.PI*2);
-  ctx.fillStyle = '#fff';
-  ctx.shadowColor = '#ffccff';
-  ctx.shadowBlur = 24;
-  ctx.fill();
-  ctx.restore();
+  const pos=getLightPos(lightBeam.path,lightBeam.t);
+  ctx.save();ctx.globalAlpha=buildProgress;
+  ctx.beginPath();ctx.arc(pos.x,pos.y,7,0,Math.PI*2);
+  ctx.fillStyle='#fff';ctx.shadowColor='#ffccff';ctx.shadowBlur=30;
+  ctx.fill();ctx.restore();
 }
 
-function scheduleNextLeaf(){
-  if(leaves.length===0) return;
-  activeLeafIdx = Math.floor(Math.random()*leaves.length);
-  const pIdx = photoQueue[qIdx % photoQueue.length];
+function scheduleNext(){
+  if(!leaves.length||!PHOTOS.length) return;
+  activeLeafIdx=Math.floor(Math.random()*leaves.length);
+  const pIdx=photoQueue[qIdx%photoQueue.length];
   qIdx++;
-  if(qIdx % photoQueue.length === 0) shuffle(photoQueue);
-
-  triggerLightBeam(activeLeafIdx, ()=>{
-    const img = new Image();
-    img.src = PHOTOS[pIdx];
-    img.onload = ()=>{ activePhoto=img; activeAlpha=0; showTimer=0; };
+  if(qIdx%photoQueue.length===0) shuffle(photoQueue);
+  triggerLight(activeLeafIdx,()=>{
+    const img=new Image();img.src=PHOTOS[pIdx];
+    img.onload=()=>{activePhoto=img;activeAlpha=0;showTimer=0;};
   });
 }
 
-// ── Draw heart ────────────────────────────────────────────────────────────────
-function drawHeart(cx,cy,angle,s,fillStyle,alpha=1){
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(cx,cy);
-  ctx.rotate(angle*Math.PI/180);
+// ── Heart draw ────────────────────────────────────────────────────────────────
+function drawHeart(cx,cy,angle,s,col,alpha=1){
+  ctx.save();ctx.globalAlpha=alpha;
+  ctx.translate(cx,cy);ctx.rotate(angle*Math.PI/180);
   ctx.beginPath();
   ctx.moveTo(0,-s*0.5);
-  ctx.bezierCurveTo( s*0.8,-s*1.2,  s*1.6, s*0.3,  0,  s*1.0);
-  ctx.bezierCurveTo(-s*1.6, s*0.3, -s*0.8,-s*1.2,  0, -s*0.5);
-  ctx.fillStyle = fillStyle;
-  ctx.shadowColor = fillStyle;
-  ctx.shadowBlur  = 8;
-  ctx.fill();
-  ctx.restore();
+  ctx.bezierCurveTo(s*0.8,-s*1.2,s*1.6,s*0.3,0,s*1.0);
+  ctx.bezierCurveTo(-s*1.6,s*0.3,-s*0.8,-s*1.2,0,-s*0.5);
+  ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=10;
+  ctx.fill();ctx.restore();
 }
 
-// ── Bezier helper for roots ───────────────────────────────────────────────────
-function bezPt(r, t){
-  const mt=1-t;
-  return {
-    x: mt*mt*mt*r.sx + 3*mt*mt*t*r.cx1 + 3*mt*t*t*r.cx2 + t*t*t*r.ex,
-    y: mt*mt*mt*r.sy + 3*mt*mt*t*r.cy1 + 3*mt*t*t*r.cy2 + t*t*t*r.ey,
-  };
-}
-
-// ── Title text particles (header built from dust) ─────────────────────────────
-// We just draw text with alpha tied to buildProgress
-function drawHeader(bp){
-  const title = `✦ Happy Birthday ${RECIPIENT||'To You'} ✦`;
-  const sub   = 'A little magic, grown just for you 🌹';
-  ctx.save();
-  ctx.globalAlpha = clamp((bp-0.1)/0.35, 0, 1);
-  ctx.textAlign   = 'center';
-
-  // Glow pass
-  ctx.font = `bold ${clamp(W*0.042,22,54)}px 'Cinzel', serif`;
-  ctx.fillStyle   = '#d4a853';
-  ctx.shadowColor = '#d4a853';
-  ctx.shadowBlur  = 30 + Math.sin(frame*0.03)*15;
-  ctx.fillText(title, W/2, H*0.07);
-
-  ctx.shadowBlur  = 0;
-  ctx.font = `italic ${clamp(W*0.022,13,26)}px 'Dancing Script', cursive`;
-  ctx.fillStyle   = '#f48fb1';
-  ctx.shadowColor = '#f48fb1';
-  ctx.shadowBlur  = 10;
-  ctx.fillText(sub, W/2, H*0.12);
-  ctx.restore();
-}
+// ── Font sizes (responsive) ───────────────────────────────────────────────────
+function titleSize(){ return clamp(W*0.038,18,52); }
+function subSize(){   return clamp(W*0.021,12,26); }
+function rootSize(){  return clamp(W*0.019,10,22); }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
-let frame       = 0;
-let rootFrame   = 0;
-let firstLeafScheduled = false;
+let frame=0, rootFrame=0, firstLeaf=false;
 
 function animate(){
   requestAnimationFrame(animate);
   frame++;
-
-  // Update build progress
-  buildProgress = clamp(buildProgress + BUILD_SPEED, 0, 1);
-
-  // Build tree once canvas is sized
-  if(!treeBuilt && W>0){
-    buildTree();
-    treeBuilt=true;
-  }
+  buildProgress=clamp(buildProgress+BUILD_SPEED,0,1);
+  const bp=buildProgress;
 
   // Clear
-  ctx.fillStyle = '#0a0008';
-  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#0a0008';ctx.fillRect(0,0,W,H);
 
-  // ── Draw + update dust ──────────────────────────────────────────────────────
+  // Dust
   dusts.forEach(d=>{
-    d.update();
-    d.draw();
-    if(d.settled && d.life<=0) d.reset();
-    if(!d.settled && d.y > H+10) d.reset();
+    d.update();d.draw();
+    if(d.settled&&d.life<=0) d.reset();
+    if(!d.settled&&d.y>H+10) d.reset();
   });
 
-  const bp = buildProgress;
+  // ── Title (fully centered, responsive) ──────────────────────────────────────
+  const titleAlpha=clamp((bp-0.08)/0.3,0,1);
+  if(titleAlpha>0){
+    ctx.save();ctx.globalAlpha=titleAlpha;ctx.textAlign='center';
 
-  // ── Draw header ──────────────────────────────────────────────────────────────
-  drawHeader(bp);
+    const title=`✦ Happy Birthday${RECIPIENT?' '+RECIPIENT:' To You'} ✦`;
+    ctx.font=`bold ${titleSize()}px 'Cinzel',serif`;
+    // Wrap if too wide
+    const maxW=W*0.9;
+    const metrics=ctx.measureText(title);
+    ctx.fillStyle='#d4a853';
+    ctx.shadowColor='#d4a853';
+    ctx.shadowBlur=25+Math.sin(frame*0.03)*12;
+    if(metrics.width>maxW){
+      // Split into two lines
+      const half=Math.ceil(title.length/2);
+      const sp=title.lastIndexOf(' ',half);
+      const l1=title.slice(0,sp), l2=title.slice(sp+1);
+      const lh=titleSize()*1.25;
+      ctx.fillText(l1,W/2,TITLE_Y);
+      ctx.fillText(l2,W/2,TITLE_Y+lh);
+    } else {
+      ctx.fillText(title,W/2,TITLE_Y);
+    }
 
-  // ── Draw roots ───────────────────────────────────────────────────────────────
-  if(bp > 0.82){
+    ctx.shadowBlur=0;
+    ctx.font=`italic ${subSize()}px 'Dancing Script',cursive`;
+    ctx.fillStyle='#f48fb1';ctx.shadowColor='#f48fb1';ctx.shadowBlur=8;
+    ctx.fillText('A little magic, grown just for you 🌹',W/2,SUB_Y);
+    ctx.restore();
+  }
+
+  // ── Roots ────────────────────────────────────────────────────────────────────
+  if(bp>0.80){
     rootFrame++;
-    roots.forEach((root,i)=>{
-      if(rootFrame < root.delay) return;
-      const localBP = clamp((bp - root.revealAt)/(1-root.revealAt), 0, 1);
-      if(!root.done) root.progress = Math.min(1, root.progress + root.speed);
-      if(root.progress >= 1) root.done = true;
+    roots.forEach((r,i)=>{
+      if(rootFrame<r.delay) return;
+      const la=clamp((bp-r.revealAt)/(1-r.revealAt),0,1);
+      if(!r.done) r.progress=Math.min(1,r.progress+r.speed);
+      if(r.progress>=1) r.done=true;
+      const t=r.progress*la;
 
-      const t = root.progress * localBP;
-      ctx.beginPath();
-      ctx.moveTo(root.sx, root.sy);
-      for(let s=1;s<=40;s++){
-        const pt = bezPt(root,(s/40)*t);
-        ctx.lineTo(pt.x, pt.y);
-      }
-      ctx.strokeStyle = '#7a4020';
-      ctx.lineWidth   = Math.max(1.5, 4*(W/900));
-      ctx.lineCap     = 'round';
-      ctx.globalAlpha = localBP;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.save();ctx.globalAlpha=la;
+      ctx.beginPath();ctx.moveTo(r.sx,r.sy);
+      for(let s=1;s<=40;s++){const pt=bezPt(r,(s/40)*t);ctx.lineTo(pt.x,pt.y);}
+      ctx.strokeStyle='#7a4020';
+      ctx.lineWidth=Math.max(1.5,3.5*(Math.min(W,H)/700));
+      ctx.lineCap='round';ctx.stroke();ctx.restore();
 
-      if(root.progress > 0.92){
-        root.alpha = Math.min(1,(root.progress-0.92)/0.08) * localBP;
-        const ep = bezPt(root,1);
-        ctx.save();
-        ctx.globalAlpha = root.alpha;
-        ctx.font        = `italic ${Math.round(W*0.021)}px 'Dancing Script', cursive`;
-        ctx.fillStyle   = '#f5c842';
-        ctx.textAlign   = 'center';
-        ctx.shadowColor = 'rgba(212,168,83,.9)';
-        ctx.shadowBlur  = 10;
-        ctx.fillText(root.word, ep.x, ep.y+5);
+      if(r.progress>0.9){
+        r.alpha=Math.min(1,(r.progress-0.9)/0.1)*la;
+        const ep=bezPt(r,1);
+        ctx.save();ctx.globalAlpha=r.alpha;
+        ctx.font=`italic ${rootSize()}px 'Dancing Script',cursive`;
+        ctx.fillStyle='#f5c842';ctx.textAlign='center';
+        ctx.shadowColor='rgba(212,168,83,.9)';ctx.shadowBlur=10;
+        ctx.fillText(r.word,ep.x,ep.y+5);
         ctx.restore();
       }
     });
   }
 
-  // ── Draw branches ────────────────────────────────────────────────────────────
+  // ── Branches ─────────────────────────────────────────────────────────────────
   branches.forEach(b=>{
-    const alpha = clamp((bp - b.revealAt*0.6) / 0.25, 0, 1);
+    const alpha=clamp((bp-b.revealAt*0.55)/0.25,0,1);
     if(alpha<=0) return;
-    const grad = ctx.createLinearGradient(b.x1,b.y1,b.x2,b.y2);
-    const dark  = b.depth===0?'#4a2008':'#3b1800';
-    const light = b.depth===0?'#7a4020':'#5c2a0e';
-    grad.addColorStop(0,dark); grad.addColorStop(1,light);
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.moveTo(b.x1,b.y1); ctx.lineTo(b.x2,b.y2);
-    ctx.strokeStyle = grad;
-    ctx.lineWidth   = Math.max(1.2, (7-b.depth)*2.2*(W/900));
-    ctx.lineCap     = 'round';
-    ctx.stroke();
-    ctx.restore();
+    const grad=ctx.createLinearGradient(b.x1,b.y1,b.x2,b.y2);
+    grad.addColorStop(0,b.depth===0?'#4a2008':'#3b1800');
+    grad.addColorStop(1,b.depth===0?'#7a4020':'#5c2a0e');
+    ctx.save();ctx.globalAlpha=alpha;
+    ctx.beginPath();ctx.moveTo(b.x1,b.y1);ctx.lineTo(b.x2,b.y2);
+    ctx.strokeStyle=grad;
+    ctx.lineWidth=Math.max(1,(7-b.depth)*2*(Math.min(W,H)/700));
+    ctx.lineCap='round';ctx.stroke();ctx.restore();
   });
 
-  // ── Draw leaves ───────────────────────────────────────────────────────────────
+  // ── Leaves ───────────────────────────────────────────────────────────────────
+  const romanticHues=[340,355,320,350,308,335,345];
   leaves.forEach((lf,i)=>{
-    const alpha = clamp((bp - lf.revealAt)/0.15, 0, 1);
+    const alpha=clamp((bp-lf.revealAt)/0.15,0,1);
     if(alpha<=0) return;
-    const sway  = Math.sin(frame*0.04*lf.swaySpeed + lf.phase)*lf.swayAmp;
-    const dispA = lf.baseAngle - 90 + sway;
-    const isActive = (i===activeLeafIdx);
-    const swayX = Math.sin(frame*0.025*lf.swaySpeed+lf.phase)*lf.swayAmp*0.3;
-    const swayY = Math.cos(frame*0.025*lf.swaySpeed+lf.phase)*lf.swayAmp*0.15;
+    const sway=Math.sin(frame*0.04*lf.swaySpeed+lf.phase)*lf.swayAmp;
+    const sx=Math.sin(frame*0.025*lf.swaySpeed+lf.phase)*lf.swayAmp*0.3;
+    const sy=Math.cos(frame*0.025*lf.swaySpeed+lf.phase)*lf.swayAmp*0.15;
+    const isActive=(i===activeLeafIdx);
+    const hue=isActive?330+Math.sin(frame*0.05)*15:romanticHues[i%romanticHues.length];
+    const lit=isActive?62:40+Math.sin(frame*0.03+lf.phase)*5;
+    drawHeart(lf.cx+sx,lf.cy+sy,lf.baseAngle-90+sway,lf.size,
+      `hsl(${hue},75%,${lit}%)`,alpha);
 
-    // Romantic colors: deep rose, magenta, crimson, dusty pink
-    const hue = isActive
-      ? 330 + Math.sin(frame*0.05)*20
-      : [340,350,320,355,305][Math.floor(lf.phase*5/(Math.PI*2)*5)%5];
-    const sat = isActive ? 85 : 65;
-    const lit = isActive ? 60 : 38 + Math.sin(frame*0.03+lf.phase)*5;
-    const col = `hsl(${hue},${sat}%,${lit}%)`;
-
-    drawHeart(lf.cx+swayX, lf.cy+swayY, dispA, lf.size, col, alpha);
-
-    // Active leaf: show photo above it
-    if(isActive && activePhoto){
+    // Photo above active leaf
+    if(isActive&&activePhoto){
       showTimer++;
-      if(activeAlpha<1) activeAlpha = Math.min(1, activeAlpha+0.04);
-      if(showTimer>SHOW_DUR) activeAlpha = Math.max(0, activeAlpha-0.035);
-      if(showTimer>SHOW_DUR+30){
-        activePhoto=null; activeAlpha=0;
-        setTimeout(scheduleNextLeaf, 1000);
-      }
-
+      if(activeAlpha<1) activeAlpha=Math.min(1,activeAlpha+0.04);
+      if(showTimer>SHOW_DUR) activeAlpha=Math.max(0,activeAlpha-0.032);
+      if(showTimer>SHOW_DUR+35){activePhoto=null;activeAlpha=0;setTimeout(scheduleNext,900);}
       if(activeAlpha>0){
-        const pw = clamp(W*0.22, 100, 220);
-        const ph = pw;
-        const px = lf.cx + swayX - pw/2;
-        const py = lf.cy + swayY - lf.size*2.5 - ph;
-        ctx.save();
-        // Glow frame
-        ctx.globalAlpha = activeAlpha * 0.6;
-        ctx.shadowColor = '#c9185b';
-        ctx.shadowBlur  = 30;
-        ctx.fillStyle   = '#c9185b';
-        ctx.beginPath();
-        ctx.roundRect(px-3, py-3, pw+6, ph+6, 14);
-        ctx.fill();
-        ctx.restore();
-        // Photo
-        ctx.save();
-        ctx.globalAlpha = activeAlpha;
-        ctx.beginPath();
-        ctx.roundRect(px, py, pw, ph, 12);
-        ctx.clip();
-        ctx.drawImage(activePhoto, px, py, pw, ph);
-        ctx.restore();
-        // Border
-        ctx.save();
-        ctx.globalAlpha = activeAlpha;
-        ctx.beginPath(); ctx.roundRect(px,py,pw,ph,12);
-        ctx.strokeStyle = '#f48fb1';
-        ctx.lineWidth   = 2;
-        ctx.stroke();
-        ctx.restore();
+        const pw=clamp(Math.min(W,H)*0.2,80,200);
+        const px=lf.cx+sx-pw/2, py=lf.cy+sy-lf.size*2.5-pw;
+        ctx.save();ctx.globalAlpha=activeAlpha*0.5;
+        ctx.fillStyle='#c9185b';ctx.shadowColor='#c9185b';ctx.shadowBlur=28;
+        ctx.beginPath();ctx.roundRect(px-4,py-4,pw+8,pw+8,14);ctx.fill();ctx.restore();
+        ctx.save();ctx.globalAlpha=activeAlpha;
+        ctx.beginPath();ctx.roundRect(px,py,pw,pw,11);ctx.clip();
+        ctx.drawImage(activePhoto,px,py,pw,pw);ctx.restore();
+        ctx.save();ctx.globalAlpha=activeAlpha;
+        ctx.beginPath();ctx.roundRect(px,py,pw,pw,11);
+        ctx.strokeStyle='#f48fb1';ctx.lineWidth=2;ctx.stroke();ctx.restore();
       }
     }
   });
 
-  // ── Light beam ───────────────────────────────────────────────────────────────
-  drawLightBeam();
+  // Light beam
+  drawLight();
 
-  // ── Schedule first leaf once tree is visible ─────────────────────────────────
-  if(!firstLeafScheduled && bp > 0.95 && leaves.length>0 && PHOTOS.length>0){
-    firstLeafScheduled = true;
-    setTimeout(scheduleNextLeaf, 800);
+  // Schedule first leaf
+  if(!firstLeaf&&bp>0.96&&leaves.length>0&&PHOTOS.length>0){
+    firstLeaf=true;setTimeout(scheduleNext,600);
   }
 }
-
 animate();
 
-// ── Click canvas → show full photo ────────────────────────────────────────────
-canvas.addEventListener('click', e=>{
-  const mx = e.clientX, my = e.clientY;
+// Click leaf → full photo
+canvas.addEventListener('click',e=>{
+  const mx=e.clientX,my=e.clientY;
   leaves.forEach((lf,i)=>{
-    const dx=mx-lf.cx, dy=my-lf.cy;
-    if(Math.sqrt(dx*dx+dy*dy) < lf.size*2.5){
-      const pi = photoQueue[(qIdx+i)%PHOTOS.length];
-      document.getElementById('modalImg').src = PHOTOS[pi];
+    const dx=mx-lf.cx,dy=my-lf.cy;
+    if(Math.sqrt(dx*dx+dy*dy)<lf.size*2.8){
+      const pi=photoQueue[(qIdx+i)%PHOTOS.length];
+      document.getElementById('modalImg').src=PHOTOS[pi];
       document.getElementById('photoModal').classList.add('show');
     }
   });
