@@ -11,8 +11,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#050005;}
 #mainCanvas{position:fixed;top:0;left:0;width:100vw;height:100vh;display:block;}
 #photoModal{
   display:none;position:fixed;inset:0;z-index:999;
-  background:rgba(0,0,0,.9);align-items:center;justify-content:center;
-  cursor:pointer;
+  background:rgba(0,0,0,.92);align-items:center;justify-content:center;cursor:pointer;
 }
 #photoModal.show{display:flex;}
 #photoModal img{
@@ -39,588 +38,462 @@ var RECIPIENT = {{ recipient|tojson }};
 
 var canvas = document.getElementById('mainCanvas');
 var ctx    = canvas.getContext('2d');
-var W, H;
-
-// ── Layout constants (recalculated on resize) ─────────────────────────────────
-var ROOT_X, ROOT_Y, TRUNK_L;
+var W, H, ROOT_X, ROOT_Y, TRUNK_L;
+var needRebuild = true;
 
 function resize(){
   W = canvas.width  = window.innerWidth;
   H = canvas.height = window.innerHeight;
   ROOT_X  = W * 0.5;
-  ROOT_Y  = H * 0.80;          // tree base at 80% — title has room at top
-  TRUNK_L = Math.min(H * 0.20, W * 0.18);  // shorter trunk = smaller tree
+  ROOT_Y  = H * 0.83;          // pushed lower
+  TRUNK_L = Math.min(H * 0.22, W * 0.20);
   needRebuild = true;
 }
-
-var needRebuild = true;
 resize();
 window.addEventListener('resize', resize);
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function rand(a,b){ return a + Math.random()*(b-a); }
-function lerp(a,b,t){ return a + (b-a)*t; }
-function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+function rand(a,b){ return a+Math.random()*(b-a); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function fs(base){ return clamp(W*base,14,60); }
 
-// Polyfill roundRect
+// rounded rect polyfill
 function rr(x,y,w,h,r){
-  r = Math.min(r, w/2, h/2);
+  r=Math.min(r,w/2,h/2);
   ctx.beginPath();
   ctx.moveTo(x+r,y);
-  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
   ctx.closePath();
 }
 
 // ── Stars ─────────────────────────────────────────────────────────────────────
-var stars = [];
+var stars=[];
 function makeStars(){
-  stars = [];
-  for(var i=0;i<140;i++){
-    stars.push({
-      x:rand(0,W), y:rand(0,H*0.85),
-      r:rand(0.5,2), a:rand(0.3,1),
-      speed:rand(1.5,4.5), phase:rand(0,Math.PI*2)
-    });
-  }
+  stars=[];
+  for(var i=0;i<160;i++) stars.push({
+    x:rand(0,W),y:rand(0,H*0.9),
+    r:rand(0.4,2),a:rand(0.3,1),
+    sp:rand(1.5,4.5),ph:rand(0,Math.PI*2)
+  });
 }
 makeStars();
-function drawStars(frame){
+function drawStars(f){
   for(var i=0;i<stars.length;i++){
     var s=stars[i];
-    var alpha = s.a * (0.4 + 0.6*Math.abs(Math.sin(frame*0.008*s.speed+s.phase)));
-    ctx.save();ctx.globalAlpha=alpha;
+    ctx.save();ctx.globalAlpha=s.a*(0.3+0.7*Math.abs(Math.sin(f*0.007*s.sp+s.ph)));
     ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
     ctx.fillStyle='#fff';ctx.fill();ctx.restore();
   }
 }
 
-// ── Floating petals ───────────────────────────────────────────────────────────
-var petals = [];
-function makePetals(){
-  petals=[];
-  for(var i=0;i<35;i++) petals.push(newPetal(true));
-}
+// ── Floating heart petals ─────────────────────────────────────────────────────
+var petals=[];
 function newPetal(init){
-  return {
-    x: rand(0,W),
-    y: init ? rand(-H,0) : rand(-40,-5),
-    vy: rand(0.4,1.2),
-    vx: rand(-0.4,0.4),
-    size: rand(3,7),
-    rot: rand(0,Math.PI*2),
-    rotSpeed: rand(-0.03,0.03),
-    alpha: rand(0.3,0.7),
-    hue: rand(310,360),
-  };
+  return{x:rand(0,W),y:init?rand(-H,0):rand(-40,-5),
+    vy:rand(0.35,1.1),vx:rand(-0.4,0.4),
+    size:rand(3,7),rot:rand(0,Math.PI*2),rs:rand(-0.03,0.03),
+    a:rand(0.25,0.65),hue:rand(305,360)};
 }
+for(var pi=0;pi<40;pi++) petals.push(newPetal(true));
 function updatePetals(){
   for(var i=0;i<petals.length;i++){
     var p=petals[i];
-    p.x += p.vx + Math.sin(p.y*0.012)*0.3;
-    p.y += p.vy;
-    p.rot += p.rotSpeed;
-    if(p.y > H+20){ petals[i]=newPetal(false); }
+    p.x+=p.vx+Math.sin(p.y*0.01)*0.3;p.y+=p.vy;p.rot+=p.rs;
+    if(p.y>H+20) petals[i]=newPetal(false);
   }
 }
-function drawPetals(){
+function drawPetals(ta){
   for(var i=0;i<petals.length;i++){
     var p=petals[i];
-    ctx.save();ctx.globalAlpha=p.alpha*titleAlpha;
+    ctx.save();ctx.globalAlpha=p.a*ta;
     ctx.translate(p.x,p.y);ctx.rotate(p.rot);
-    // small heart petal
     var s=p.size;
-    ctx.beginPath();
-    ctx.moveTo(0,-s*0.4);
+    ctx.beginPath();ctx.moveTo(0,-s*0.4);
     ctx.bezierCurveTo(s*0.6,-s,s*1.2,s*0.2,0,s*0.9);
     ctx.bezierCurveTo(-s*1.2,s*0.2,-s*0.6,-s,0,-s*0.4);
-    ctx.fillStyle='hsl('+p.hue+',90%,75%)';
-    ctx.fill();ctx.restore();
+    ctx.fillStyle='hsl('+p.hue+',90%,75%)';ctx.fill();ctx.restore();
   }
 }
-makePetals();
 
-// ── Dust / build particles ────────────────────────────────────────────────────
-var dustParticles = [];
-for(var di=0;di<200;di++){
-  dustParticles.push({
-    x:rand(0,W), y:rand(-H,0),
-    vy:rand(0.3,1.4), vx:rand(-0.25,0.25),
-    r:rand(0.8,2.5), a:rand(0.3,0.8),
-    hue:rand(290,360),
-    settleY:rand(H*0.1,H*0.98),
-    settled:false, life:1,
-  });
-}
+// ── Dust ──────────────────────────────────────────────────────────────────────
+var dusts=[];
+for(var di=0;di<220;di++) dusts.push({
+  x:rand(0,W),y:rand(-H,0),vy:rand(0.3,1.3),vx:rand(-0.2,0.2),
+  r:rand(0.7,2.2),a:rand(0.3,0.75),hue:rand(285,360),
+  settled:false,settleY:rand(H*0.05,H*0.98),life:1
+});
 function updateDust(){
-  for(var i=0;i<dustParticles.length;i++){
-    var d=dustParticles[i];
-    if(d.settled){ d.life-=0.006; if(d.life<=0) resetDust(d,false); continue; }
-    d.x += d.vx + Math.sin(d.y*0.015)*0.2;
-    d.y += d.vy;
-    if(d.y>d.settleY) d.settled=true;
-    if(d.y>H+10) resetDust(d,false);
+  for(var i=0;i<dusts.length;i++){
+    var d=dusts[i];
+    if(d.settled){d.life-=0.006;if(d.life<=0)resetDust(d);continue;}
+    d.x+=d.vx+Math.sin(d.y*0.015)*0.18;d.y+=d.vy;
+    if(d.y>d.settleY)d.settled=true;
+    if(d.y>H+10)resetDust(d);
   }
 }
-function resetDust(d,init){
-  d.x=rand(0,W); d.y=init?rand(-H,0):rand(-50,-5);
-  d.vy=rand(0.3,1.4); d.vx=rand(-0.25,0.25);
-  d.settled=false; d.life=1; d.settleY=rand(H*0.1,H*0.98);
+function resetDust(d){
+  d.x=rand(0,W);d.y=rand(-50,-5);d.vy=rand(0.3,1.3);d.vx=rand(-0.2,0.2);
+  d.settled=false;d.life=1;d.settleY=rand(H*0.05,H*0.98);
 }
-function drawDust(){
-  for(var i=0;i<dustParticles.length;i++){
-    var d=dustParticles[i];
-    ctx.save();
-    ctx.globalAlpha=(d.settled?d.a*d.life:d.a*0.5)*clamp(buildProgress*3,0,1);
+function drawDust(bp){
+  var show=clamp(bp*3,0,1);
+  for(var i=0;i<dusts.length;i++){
+    var d=dusts[i];
+    ctx.save();ctx.globalAlpha=(d.settled?d.a*d.life:d.a*0.45)*show;
     ctx.beginPath();ctx.arc(d.x,d.y,d.r,0,Math.PI*2);
-    var col='hsl('+d.hue+',75%,70%)';
-    ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=3;
+    var col='hsl('+d.hue+',75%,70%)';ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=3;
     ctx.fill();ctx.restore();
   }
 }
 
-// ── Scene phases ──────────────────────────────────────────────────────────────
-// 0-0.25: title fades in
-// 0.25-0.65: tree grows (branches, then leaves)
-// 0.65-1.0: roots grow
-var buildProgress = 0;
-var titleAlpha    = 0;
-var BUILD_SPEED   = 0.0018;
+// ── Build progress ────────────────────────────────────────────────────────────
+var buildProgress=0;
+var BUILD_SPEED=0.0016;
 
-// ── Tree ──────────────────────────────────────────────────────────────────────
+// ── Tree (more branches, more depth) ─────────────────────────────────────────
 var branches=[], leaves=[];
-var MAX_DEPTH = 5;  // reduced depth = smaller, cleaner tree
+var MAX_DEPTH=7; // deeper = more branches & leaves
 
 function buildTree(){
-  branches=[]; leaves=[];
-
+  branches=[];leaves=[];
   function grow(x,y,angle,len,depth){
-    if(depth>MAX_DEPTH||len<8) return;
+    if(depth>MAX_DEPTH||len<6) return;
     var rad=angle*Math.PI/180;
-    var x2=x+Math.cos(rad)*len;
-    var y2=y-Math.sin(rad)*len;
-    var phase = (depth-1)/(MAX_DEPTH); // 0=trunk, 1=tips
+    var x2=x+Math.cos(rad)*len, y2=y-Math.sin(rad)*len;
+    var ph=depth/(MAX_DEPTH+1);
     branches.push({x1:x,y1:y,x2:x2,y2:y2,depth:depth,
-      revealStart: 0.25 + phase*0.3,
-      revealEnd:   0.30 + phase*0.3 + 0.12});
+      rs:0.25+ph*0.32, re:0.30+ph*0.32+0.10});
     if(depth===MAX_DEPTH){
       leaves.push({
-        cx:x2, cy:y2, baseAngle:angle,
+        cx:x2,cy:y2,baseAngle:angle,
         phase:rand(0,Math.PI*2),
-        // Smaller leaves so heart shape is clear
-        size: Math.min(W,H)*0.018 + rand(0,Math.min(W,H)*0.007),
-        swayAmp:rand(3,8), swaySpeed:rand(0.5,1.2),
-        revealStart:0.52+rand(0,0.18),
-        hue: [338,352,318,348,305,332][Math.floor(rand(0,6))],
+        size:Math.min(W,H)*0.016+rand(0,Math.min(W,H)*0.006),
+        swayAmp:rand(3,9),swaySpeed:rand(0.45,1.2),
+        rs:0.50+rand(0,0.20),
+        hue:[338,352,318,348,305,332,345][Math.floor(rand(0,7))],
       });
       return;
     }
-    var spread = lerp(28,12,depth/MAX_DEPTH);
-    var lm = rand(0.70,0.80);
+    var spread=lerp(32,12,depth/MAX_DEPTH);
+    var lm=rand(0.68,0.77);
     grow(x2,y2,angle+spread,len*lm,depth+1);
     grow(x2,y2,angle-spread,len*lm,depth+1);
-    if(depth<2) grow(x2,y2,angle+spread*0.3,len*lm*0.85,depth+2);
+    // extra middle branch on lower depths for fullness
+    if(depth<4) grow(x2,y2,angle+spread*0.28,len*lm*0.80,depth+2);
   }
 
-  grow(ROOT_X, ROOT_Y, 90, TRUNK_L, 0);
-  // A couple side branches for fullness
-  for(var i=0;i<3;i++){
-    var by = ROOT_Y - TRUNK_L*(0.4+Math.random()*0.3);
-    var side = Math.random()<.5?1:-1;
-    grow(ROOT_X, by, 90+side*rand(20,42), TRUNK_L*rand(0.28,0.40), 2);
+  grow(ROOT_X,ROOT_Y,90,TRUNK_L,0);
+  // Extra side shoots for wide canopy
+  for(var i=0;i<6;i++){
+    var by=ROOT_Y-TRUNK_L*(0.30+Math.random()*0.40);
+    var side=Math.random()<.5?1:-1;
+    grow(ROOT_X,by,90+side*rand(18,45),TRUNK_L*rand(0.28,0.42),2);
   }
-  needRebuild = false;
+  needRebuild=false;
 }
 
-// ── Roots ─────────────────────────────────────────────────────────────────────
-var roots = [];
+// ── Roots — CLEAN word list, NO duplicates ────────────────────────────────────
+// The root words are ONLY the message the user typed.
+// "Happy Birthday [Name]" is shown in the TITLE, not roots.
+// Roots = message words only (what user typed in the message box).
+var rootWords = MESSAGE.trim() ? MESSAGE.trim().split(/\s+/).slice(0,20) : [];
+// If no message, show recipient name words in roots instead
+if(!rootWords.length && RECIPIENT && RECIPIENT.trim()){
+  rootWords = RECIPIENT.trim().split(/\s+/);
+}
 
-// Build word list: "Happy Birthday [Name]" then message
-var nameWords = ['Happy','Birthday'];
-if(RECIPIENT && RECIPIENT.trim()) nameWords.push(RECIPIENT.trim());
-var msgWords = MESSAGE.trim() ? MESSAGE.trim().split(/\s+/).slice(0,17) : [];
-// deduplicate: remove msg words that clash with nameWords
-var allWords = nameWords.concat(msgWords).slice(0,20);
-
+var roots=[];
 function buildRoots(){
   roots=[];
-  if(!allWords.length) return;
-
-  var rootBaseY = ROOT_Y + H*0.008;
-  // Split into left/right groups — left gets even indices (0,2,4...), right odd
-  var leftW=[], rightW=[];
-  for(var i=0;i<allWords.length;i++){
-    if(i%2===0) leftW.push(allWords[i]);
-    else rightW.push(allWords[i]);
+  if(!rootWords.length) return;
+  var baseY=ROOT_Y+H*0.008;
+  var halfSpread=Math.min(W*0.40, W*0.07*rootWords.length);
+  // left words: indices 0,2,4... right: 1,3,5...
+  var lw=[], rw=[];
+  for(var i=0;i<rootWords.length;i++){
+    if(i%2===0) lw.push(rootWords[i]);
+    else rw.push(rootWords[i]);
   }
-
-  // Max spread based on word count
-  var maxCount = Math.max(leftW.length, rightW.length);
-  var spread   = Math.min(W*0.42, W*0.08*maxCount);
-
-  // Build in reading order: left[0],right[0],left[1],right[1]...
+  var maxC=Math.max(lw.length,rw.length);
   var idx=0;
-  for(var i=0;i<maxCount;i++){
-    if(i<leftW.length){
-      addRoot(leftW[i],-1,i,maxCount,spread,rootBaseY,idx++);
-    }
-    if(i<rightW.length){
-      addRoot(rightW[i],1,i,maxCount,spread,rootBaseY,idx++);
-    }
+  for(var i=0;i<maxC;i++){
+    if(i<lw.length) addRoot(lw[i],-1,i,maxC,halfSpread,baseY,idx++);
+    if(i<rw.length) addRoot(rw[i], 1,i,maxC,halfSpread,baseY,idx++);
   }
 }
-
-function addRoot(word,side,rank,total,spread,baseY,delayIdx){
-  var frac   = (rank+1)/(total+0.5);
-  var ex     = ROOT_X + side*spread*frac;
-  var ey     = baseY + H*0.072 + rank*H*0.018;
-  var cx1    = ROOT_X + (ex-ROOT_X)*0.2 + Math.sin(delayIdx*1.3)*W*0.03;
-  var cy1    = baseY + H*0.025;
-  var cx2    = ROOT_X + (ex-ROOT_X)*0.75 + Math.cos(delayIdx*2.1)*W*0.025;
-  var cy2    = ey - H*0.012;
+function addRoot(word,side,rank,total,spread,baseY,delay){
+  var frac=(rank+1)/(total+0.5);
+  var ex=ROOT_X+side*spread*frac;
+  var ey=baseY+H*0.07+rank*H*0.016;
   roots.push({
-    word:word, sx:ROOT_X, sy:baseY, ex:ex, ey:ey,
-    cx1:cx1, cy1:cy1, cx2:cx2, cy2:cy2,
-    progress:0, speed:0.0035+rand(0,0.002),
-    done:false, textAlpha:0,
-    delay: delayIdx*45,   // staggered
-    revealAt: 0.68,       // roots start after tree appears
+    word:word,sx:ROOT_X,sy:baseY,ex:ex,ey:ey,
+    cx1:ROOT_X+(ex-ROOT_X)*0.2+Math.sin(delay*1.4)*W*0.028,
+    cy1:baseY+H*0.022,
+    cx2:ROOT_X+(ex-ROOT_X)*0.75+Math.cos(delay*2.0)*W*0.022,
+    cy2:ey-H*0.010,
+    progress:0,speed:0.0032+rand(0,0.002),
+    done:false,textAlpha:0,delay:delay*42,revealAt:0.70,
   });
 }
 buildRoots();
 
 function bezPt(r,t){
   var mt=1-t;
-  return {
-    x: mt*mt*mt*r.sx + 3*mt*mt*t*r.cx1 + 3*mt*t*t*r.cx2 + t*t*t*r.ex,
-    y: mt*mt*mt*r.sy + 3*mt*mt*t*r.cy1 + 3*mt*t*t*r.cy2 + t*t*t*r.ey,
+  return{
+    x:mt*mt*mt*r.sx+3*mt*mt*t*r.cx1+3*mt*t*t*r.cx2+t*t*t*r.ex,
+    y:mt*mt*mt*r.sy+3*mt*mt*t*r.cy1+3*mt*t*t*r.cy2+t*t*t*r.ey
   };
 }
 
 // ── Photo cycling ─────────────────────────────────────────────────────────────
-function shuffle(a){
-  for(var i=a.length-1;i>0;i--){
-    var j=Math.floor(Math.random()*(i+1));
-    var tmp=a[i];a[i]=a[j];a[j]=tmp;
-  }
-}
-var photoQueue=[];
-for(var qi=0;qi<PHOTOS.length;qi++) photoQueue.push(qi);
-shuffle(photoQueue);
-var qIdx=0;
-var activeLeafIdx=-1, activePhoto=null, activeAlpha=0, showTimer=0;
-var SHOW_DUR=220;
-var firstLeafScheduled=false;
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}}
+var pQueue=[];for(var qi=0;qi<PHOTOS.length;qi++) pQueue.push(qi);
+shuffle(pQueue);
+var qIdx=0,activeLeaf=-1,activePhoto=null,activeAlpha=0,showTimer=0;
+var SHOW_DUR=220, firstLeaf=false;
 
-// ── Burst particles (romantic burst when photo appears) ───────────────────────
+// ── Burst particles ───────────────────────────────────────────────────────────
 var burst=[];
 function spawnBurst(x,y){
-  for(var i=0;i<28;i++){
-    var angle=rand(0,Math.PI*2);
-    var speed=rand(1.5,5);
-    burst.push({
-      x:x,y:y,
-      vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed-2,
-      life:1, decay:rand(0.018,0.035),
-      size:rand(2,5), hue:rand(310,360),
-    });
+  for(var i=0;i<32;i++){
+    var a=rand(0,Math.PI*2),sp=rand(1.5,5.5);
+    burst.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-2.5,
+      life:1,decay:rand(0.016,0.032),size:rand(2,5.5),hue:rand(305,360)});
   }
 }
-function updateBurst(){
-  for(var i=burst.length-1;i>=0;i--){
-    var b=burst[i];
-    b.x+=b.vx; b.y+=b.vy; b.vy+=0.08; b.life-=b.decay;
-    if(b.life<=0) burst.splice(i,1);
-  }
-}
+function updateBurst(){for(var i=burst.length-1;i>=0;i--){var b=burst[i];b.x+=b.vx;b.y+=b.vy;b.vy+=0.09;b.life-=b.decay;if(b.life<=0)burst.splice(i,1);}}
 function drawBurst(){
   for(var i=0;i<burst.length;i++){
     var b=burst[i];
-    ctx.save();ctx.globalAlpha=b.life*0.9;
-    ctx.translate(b.x,b.y);
-    var s=b.size;
-    ctx.beginPath();
-    ctx.moveTo(0,-s*0.4);
+    ctx.save();ctx.globalAlpha=b.life*0.85;ctx.translate(b.x,b.y);
+    var s=b.size;ctx.beginPath();ctx.moveTo(0,-s*0.4);
     ctx.bezierCurveTo(s*0.6,-s,s*1.2,s*0.2,0,s*0.9);
     ctx.bezierCurveTo(-s*1.2,s*0.2,-s*0.6,-s,0,-s*0.4);
-    ctx.fillStyle='hsl('+b.hue+',90%,75%)';
-    ctx.shadowColor='hsl('+b.hue+',90%,75%)';
-    ctx.shadowBlur=6;
+    ctx.fillStyle='hsl('+b.hue+',90%,74%)';ctx.shadowColor='hsl('+b.hue+',90%,74%)';ctx.shadowBlur=6;
     ctx.fill();ctx.restore();
   }
 }
 
 // ── Light beam ────────────────────────────────────────────────────────────────
-var lightBeam=null;
-function triggerLight(leafIdx,cb){
-  if(!leaves[leafIdx]){cb();return;}
-  var lf=leaves[leafIdx];
-  lightBeam={
-    path:[
-      {x:ROOT_X, y:ROOT_Y+H*0.025},
-      {x:ROOT_X, y:ROOT_Y-TRUNK_L*0.3},
-      {x:lerp(ROOT_X,lf.cx,0.4), y:lerp(ROOT_Y-TRUNK_L*0.3,lf.cy,0.5)},
-      {x:lerp(ROOT_X,lf.cx,0.75),y:lerp(ROOT_Y-TRUNK_L*0.3,lf.cy,0.85)},
-      {x:lf.cx,y:lf.cy},
-    ],
-    t:0, speed:0.019, cb:cb, leafIdx:leafIdx
-  };
+var lb=null;
+function triggerLight(idx,cb){
+  if(!leaves[idx]){cb();return;}
+  var lf=leaves[idx];
+  lb={path:[
+    {x:ROOT_X,y:ROOT_Y+H*0.02},
+    {x:ROOT_X,y:ROOT_Y-TRUNK_L*0.25},
+    {x:lerp(ROOT_X,lf.cx,0.38),y:lerp(ROOT_Y-TRUNK_L*0.25,lf.cy,0.45)},
+    {x:lerp(ROOT_X,lf.cx,0.72),y:lerp(ROOT_Y-TRUNK_L*0.25,lf.cy,0.82)},
+    {x:lf.cx,y:lf.cy}
+  ],t:0,speed:0.018,cb:cb,idx:idx};
 }
 function lpos(path,t){
-  var total=path.length-1;
-  var seg=clamp(t*total,0,total-0.0001);
+  var tot=path.length-1,seg=clamp(t*tot,0,tot-0.0001);
   var i=Math.floor(seg),f=seg-i;
   return{x:lerp(path[i].x,path[i+1].x,f),y:lerp(path[i].y,path[i+1].y,f)};
 }
 function drawLight(){
-  if(!lightBeam) return;
-  lightBeam.t+=lightBeam.speed;
-  if(lightBeam.t>=1){
-    var cb=lightBeam.cb;
-    var li=lightBeam.leafIdx;
-    lightBeam=null;
-    // burst at leaf position
-    if(leaves[li]) spawnBurst(leaves[li].cx, leaves[li].cy);
-    cb();
-    return;
-  }
-  var pos=lpos(lightBeam.path,lightBeam.t);
-  // trail
+  if(!lb) return;
+  lb.t+=lb.speed;
+  if(lb.t>=1){var cb=lb.cb,idx=lb.idx;lb=null;if(leaves[idx])spawnBurst(leaves[idx].cx,leaves[idx].cy);cb();return;}
+  var pos=lpos(lb.path,lb.t);
   for(var ti=0;ti<12;ti++){
-    var tt=Math.max(0,lightBeam.t-ti*0.013);
-    var tp=lpos(lightBeam.path,tt);
+    var tt=Math.max(0,lb.t-ti*0.013);
+    var tp=lpos(lb.path,tt);
     ctx.save();ctx.globalAlpha=(1-ti/12)*0.8;
     ctx.beginPath();ctx.arc(tp.x,tp.y,4.5-ti*0.35,0,Math.PI*2);
-    ctx.fillStyle='#fff';ctx.shadowColor='#ffaaee';ctx.shadowBlur=16;
-    ctx.fill();ctx.restore();
+    ctx.fillStyle='#fff';ctx.shadowColor='#ffaaee';ctx.shadowBlur=15;ctx.fill();ctx.restore();
   }
-  ctx.save();ctx.globalAlpha=1;
-  ctx.beginPath();ctx.arc(pos.x,pos.y,8,0,Math.PI*2);
-  ctx.fillStyle='#fff';ctx.shadowColor='#ff88dd';ctx.shadowBlur=35;
-  ctx.fill();ctx.restore();
+  ctx.save();ctx.globalAlpha=1;ctx.beginPath();ctx.arc(pos.x,pos.y,8,0,Math.PI*2);
+  ctx.fillStyle='#fff';ctx.shadowColor='#ff88dd';ctx.shadowBlur=35;ctx.fill();ctx.restore();
 }
 
 function scheduleNext(){
   if(!leaves.length||!PHOTOS.length) return;
-  activeLeafIdx=Math.floor(Math.random()*leaves.length);
-  var pIdx=photoQueue[qIdx%photoQueue.length];
-  qIdx++;
-  if(qIdx%photoQueue.length===0) shuffle(photoQueue);
-  triggerLight(activeLeafIdx, function(){
-    var img=new Image();
-    img.src=PHOTOS[pIdx];
+  activeLeaf=Math.floor(Math.random()*leaves.length);
+  var pIdx=pQueue[qIdx%pQueue.length];
+  qIdx++;if(qIdx%pQueue.length===0)shuffle(pQueue);
+  triggerLight(activeLeaf,function(){
+    var img=new Image();img.src=PHOTOS[pIdx];
     img.onload=function(){activePhoto=img;activeAlpha=0;showTimer=0;};
   });
 }
 
-// ── Draw heart ────────────────────────────────────────────────────────────────
+// ── Heart ─────────────────────────────────────────────────────────────────────
 function heart(cx,cy,angle,s,col,alpha){
   ctx.save();ctx.globalAlpha=clamp(alpha,0,1);
   ctx.translate(cx,cy);ctx.rotate(angle*Math.PI/180);
-  ctx.beginPath();
-  ctx.moveTo(0,-s*0.45);
-  ctx.bezierCurveTo(s*0.75,-s*1.15, s*1.55,s*0.25, 0,s*0.95);
-  ctx.bezierCurveTo(-s*1.55,s*0.25,-s*0.75,-s*1.15, 0,-s*0.45);
-  ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=12;
-  ctx.fill();ctx.restore();
+  ctx.beginPath();ctx.moveTo(0,-s*0.45);
+  ctx.bezierCurveTo(s*0.75,-s*1.15,s*1.55,s*0.25,0,s*0.95);
+  ctx.bezierCurveTo(-s*1.55,s*0.25,-s*0.75,-s*1.15,0,-s*0.45);
+  ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=11;ctx.fill();ctx.restore();
 }
 
-// ── Responsive font ───────────────────────────────────────────────────────────
-function fs(base){ return clamp(W*base, 14, 60); }
-
-// ── Root frame counter ────────────────────────────────────────────────────────
-var rootFrame=0;
-
-// ── Main loop ─────────────────────────────────────────────────────────────────
-var frame=0;
+// ── Render ────────────────────────────────────────────────────────────────────
+var frame=0,rootFrame=0;
 
 function animate(){
   requestAnimationFrame(animate);
   frame++;
 
-  if(needRebuild){ buildTree(); buildRoots(); }
+  if(needRebuild){buildTree();buildRoots();}
 
-  buildProgress = clamp(buildProgress + BUILD_SPEED, 0, 1);
-  var bp = buildProgress;
-
-  // Title fades in first (0→0.25)
-  titleAlpha = clamp((bp-0)/0.22, 0, 1);
+  buildProgress=clamp(buildProgress+BUILD_SPEED,0,1);
+  var bp=buildProgress;
+  var titleAlpha=clamp((bp-0)/0.20,0,1);
 
   // Background
-  ctx.fillStyle='#050005';
-  ctx.fillRect(0,0,W,H);
-
-  // Subtle radial glow bg
-  var grad=ctx.createRadialGradient(W/2,H*0.5,0,W/2,H*0.5,W*0.7);
-  grad.addColorStop(0,'rgba(80,0,50,0.35)');
-  grad.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#050005';ctx.fillRect(0,0,W,H);
+  var g=ctx.createRadialGradient(W/2,H*0.52,0,W/2,H*0.52,W*0.65);
+  g.addColorStop(0,'rgba(70,0,45,0.38)');g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
 
   drawStars(frame);
-  updateDust();drawDust();
-  updatePetals();drawPetals();
+  updateDust();drawDust(bp);
+  updatePetals();drawPetals(titleAlpha);
 
-  // ── TITLE ─────────────────────────────────────────────────────────────────────
+  // ── Title ───────────────────────────────────────────────────────────────────
   if(titleAlpha>0){
     ctx.save();ctx.textAlign='center';
-
-    // Glow layer
-    ctx.globalAlpha=titleAlpha*0.4;
-    ctx.font='bold '+fs(0.042)+'px Cinzel,serif';
-    ctx.fillStyle='#e8902a';
-    ctx.shadowColor='#d4a853';ctx.shadowBlur=50;
-    var title='Happy Birthday'+(RECIPIENT&&RECIPIENT.trim()?' '+RECIPIENT.trim():'');
-    ctx.fillText(title,W/2,H*0.075);
-
-    // Main
-    ctx.globalAlpha=titleAlpha;
-    ctx.font='bold '+fs(0.042)+'px Cinzel,serif';
-    ctx.fillStyle='#f0c060';
-    ctx.shadowColor='#d4a853';ctx.shadowBlur=18+Math.sin(frame*0.04)*8;
-    // wrap if needed
-    var mw=ctx.measureText('✦ '+title+' ✦').width;
-    if(mw>W*0.86){
-      ctx.font='bold '+fs(0.030)+'px Cinzel,serif';
+    var name=RECIPIENT&&RECIPIENT.trim()?RECIPIENT.trim():'';
+    var line1='✦ Happy Birthday'+(name?' '+name:'')+' ✦';
+    ctx.font='bold '+fs(0.040)+'px Cinzel,serif';
+    // auto shrink if too wide
+    while(ctx.measureText(line1).width>W*0.86 && fs(0.040)>16){
+      var cur=parseFloat(ctx.font);
+      ctx.font='bold '+(cur-1)+'px Cinzel,serif';
     }
-    ctx.fillText('✦ '+title+' ✦',W/2,H*0.075);
-
-    ctx.globalAlpha=titleAlpha*0.9;
-    ctx.font='italic '+fs(0.022)+'px "Dancing Script",cursive';
+    // glow
+    ctx.globalAlpha=titleAlpha*0.35;
+    ctx.fillStyle='#e8902a';ctx.shadowColor='#d4a853';ctx.shadowBlur=55;
+    ctx.fillText(line1,W/2,H*0.072);
+    // sharp
+    ctx.globalAlpha=titleAlpha;
+    ctx.fillStyle='#f0c060';ctx.shadowColor='#d4a853';ctx.shadowBlur=20+Math.sin(frame*0.04)*9;
+    ctx.fillText(line1,W/2,H*0.072);
+    // subtitle
+    ctx.globalAlpha=titleAlpha*0.88;
+    ctx.font='italic '+fs(0.021)+'px "Dancing Script",cursive';
     ctx.fillStyle='#f48fb1';ctx.shadowColor='#c9185b';ctx.shadowBlur=12;
-    ctx.fillText('A little magic, grown just for you \u2764',W/2,H*0.13);
+    ctx.fillText('A little magic, grown just for you \u2764',W/2,H*0.128);
     ctx.restore();
   }
 
-  // ── ROOTS ─────────────────────────────────────────────────────────────────────
-  if(bp>0.65){
+  // ── Roots ───────────────────────────────────────────────────────────────────
+  if(bp>0.67){
     rootFrame++;
-    var rootAlphaBase=clamp((bp-0.68)/0.15,0,1);
+    var rBase=clamp((bp-0.70)/0.14,0,1);
     for(var ri=0;ri<roots.length;ri++){
       var r=roots[ri];
       if(rootFrame<r.delay) continue;
       if(!r.done) r.progress=Math.min(1,r.progress+r.speed);
       if(r.progress>=1) r.done=true;
-      var rAlpha=rootAlphaBase*clamp(r.progress*4,0,1);
-      if(rAlpha<=0) continue;
-
-      ctx.save();ctx.globalAlpha=rAlpha;
+      var ra=rBase*clamp(r.progress*5,0,1);
+      if(ra<=0) continue;
+      ctx.save();ctx.globalAlpha=ra;
       ctx.beginPath();ctx.moveTo(r.sx,r.sy);
-      for(var s=1;s<=50;s++){
-        var pt=bezPt(r,(s/50)*r.progress);
-        ctx.lineTo(pt.x,pt.y);
-      }
+      for(var s=1;s<=50;s++){var pt=bezPt(r,(s/50)*r.progress);ctx.lineTo(pt.x,pt.y);}
       ctx.strokeStyle='#8a4e28';
-      ctx.lineWidth=Math.max(1.2, 3.5*(Math.min(W,H)/800));
+      ctx.lineWidth=Math.max(1.2,3.2*(Math.min(W,H)/800));
       ctx.lineCap='round';ctx.stroke();ctx.restore();
-
       if(r.progress>0.88){
-        r.textAlpha=Math.min(1,(r.progress-0.88)/0.12)*rootAlphaBase;
+        r.textAlpha=Math.min(1,(r.progress-0.88)/0.12)*rBase;
         var ep=bezPt(r,1);
         ctx.save();ctx.globalAlpha=r.textAlpha;
-        ctx.font='italic '+fs(0.020)+'px "Dancing Script",cursive';
+        ctx.font='italic '+fs(0.019)+'px "Dancing Script",cursive';
         ctx.fillStyle='#f5c842';ctx.textAlign='center';
         ctx.shadowColor='rgba(245,200,66,.9)';ctx.shadowBlur=12;
-        ctx.fillText(r.word,ep.x,ep.y+6);ctx.restore();
+        ctx.fillText(r.word,ep.x,ep.y+5);ctx.restore();
       }
     }
   }
 
-  // ── BRANCHES ──────────────────────────────────────────────────────────────────
+  // ── Branches ────────────────────────────────────────────────────────────────
   for(var bi=0;bi<branches.length;bi++){
     var b=branches[bi];
-    var ba=clamp((bp-b.revealStart)/(b.revealEnd-b.revealStart),0,1);
+    var ba=clamp((bp-b.rs)/(b.re-b.rs),0,1);
     if(ba<=0) continue;
-    var g=ctx.createLinearGradient(b.x1,b.y1,b.x2,b.y2);
-    g.addColorStop(0,b.depth===0?'#5a2a0a':'#4a2008');
-    g.addColorStop(1,b.depth===0?'#8c5020':'#6e3810');
+    var gg=ctx.createLinearGradient(b.x1,b.y1,b.x2,b.y2);
+    gg.addColorStop(0,b.depth===0?'#5a2a0a':'#4a2008');
+    gg.addColorStop(1,b.depth===0?'#8c5020':'#6e3810');
     ctx.save();ctx.globalAlpha=ba;
     ctx.beginPath();ctx.moveTo(b.x1,b.y1);ctx.lineTo(b.x2,b.y2);
-    ctx.strokeStyle=g;
-    ctx.lineWidth=Math.max(1,(7-b.depth)*2.2*(Math.min(W,H)/800));
+    ctx.strokeStyle=gg;
+    ctx.lineWidth=Math.max(0.8,(8-b.depth)*2.0*(Math.min(W,H)/800));
     ctx.lineCap='round';ctx.stroke();ctx.restore();
   }
 
-  // ── LEAVES ────────────────────────────────────────────────────────────────────
+  // ── Leaves ──────────────────────────────────────────────────────────────────
   for(var li=0;li<leaves.length;li++){
     var lf=leaves[li];
-    var la=clamp((bp-lf.revealStart)/0.12,0,1);
+    var la=clamp((bp-lf.rs)/0.10,0,1);
     if(la<=0) continue;
-    var sway=Math.sin(frame*0.038*lf.swaySpeed+lf.phase)*lf.swayAmp;
-    var ox=Math.sin(frame*0.022*lf.swaySpeed+lf.phase)*lf.swayAmp*0.35;
-    var oy=Math.cos(frame*0.022*lf.swaySpeed+lf.phase)*lf.swayAmp*0.18;
-    var isActive=(li===activeLeafIdx);
-    var lit=isActive?65:42+Math.sin(frame*0.03+lf.phase)*6;
-    var sat=isActive?90:72;
-    heart(lf.cx+ox, lf.cy+oy, lf.baseAngle-90+sway,
-      lf.size, 'hsl('+lf.hue+','+sat+'%,'+lit+'%)', la);
+    var sw=Math.sin(frame*0.038*lf.swaySpeed+lf.phase)*lf.swayAmp;
+    var ox=Math.sin(frame*0.022*lf.swaySpeed+lf.phase)*lf.swayAmp*0.3;
+    var oy=Math.cos(frame*0.022*lf.swaySpeed+lf.phase)*lf.swayAmp*0.15;
+    var isA=(li===activeLeaf);
+    var lit=isA?65:42+Math.sin(frame*0.03+lf.phase)*6;
+    heart(lf.cx+ox,lf.cy+oy,lf.baseAngle-90+sw,lf.size,
+      'hsl('+lf.hue+','+(isA?90:72)+'%,'+lit+'%)',la);
 
-    // Active: photo floats above leaf, centered
-    if(isActive&&activePhoto){
+    if(isA&&activePhoto){
       showTimer++;
       if(activeAlpha<1) activeAlpha=Math.min(1,activeAlpha+0.045);
-      if(showTimer>SHOW_DUR) activeAlpha=Math.max(0,activeAlpha-0.030);
-      if(showTimer>SHOW_DUR+40){activePhoto=null;activeAlpha=0;setTimeout(scheduleNext,1000);}
+      if(showTimer>SHOW_DUR) activeAlpha=Math.max(0,activeAlpha-0.028);
+      if(showTimer>SHOW_DUR+45){activePhoto=null;activeAlpha=0;setTimeout(scheduleNext,1000);}
       if(activeAlpha>0){
         var pw=clamp(Math.min(W,H)*0.19,70,190);
-        // Center above the leaf — ensure it stays on screen
-        var ppx=clamp(lf.cx+ox-pw/2, 10, W-pw-10);
-        var ppy=clamp(lf.cy+oy-lf.size*2-pw-10, 10, H-pw-10);
-        // Glow ring
-        ctx.save();ctx.globalAlpha=activeAlpha*0.55;
-        ctx.fillStyle='#e91e8c';ctx.shadowColor='#e91e8c';ctx.shadowBlur=35;
+        var ppx=clamp(lf.cx+ox-pw/2,12,W-pw-12);
+        var ppy=clamp(lf.cy+oy-lf.size*2-pw-8,12,H-pw-12);
+        // glow
+        ctx.save();ctx.globalAlpha=activeAlpha*0.5;
+        ctx.fillStyle='#e91e8c';ctx.shadowColor='#e91e8c';ctx.shadowBlur=32;
         rr(ppx-5,ppy-5,pw+10,pw+10,16);ctx.fill();ctx.restore();
-        // Photo
+        // photo
         ctx.save();ctx.globalAlpha=activeAlpha;
         rr(ppx,ppy,pw,pw,12);ctx.clip();
         ctx.drawImage(activePhoto,ppx,ppy,pw,pw);ctx.restore();
-        // Border
+        // border
         ctx.save();ctx.globalAlpha=activeAlpha;
         rr(ppx,ppy,pw,pw,12);
         ctx.strokeStyle='#f48fb1';ctx.lineWidth=2.5;ctx.stroke();ctx.restore();
-        // Connector line leaf→photo
-        ctx.save();ctx.globalAlpha=activeAlpha*0.4;
-        ctx.beginPath();
-        ctx.moveTo(lf.cx+ox, lf.cy+oy-lf.size);
-        ctx.lineTo(ppx+pw/2, ppy+pw);
-        ctx.strokeStyle='#f48fb1';ctx.lineWidth=1.5;ctx.setLineDash([4,4]);
+        // connector
+        ctx.save();ctx.globalAlpha=activeAlpha*0.35;
+        ctx.beginPath();ctx.moveTo(lf.cx+ox,lf.cy+oy-lf.size);ctx.lineTo(ppx+pw/2,ppy+pw);
+        ctx.strokeStyle='#f48fb1';ctx.lineWidth=1.5;ctx.setLineDash([4,5]);
         ctx.stroke();ctx.setLineDash([]);ctx.restore();
       }
     }
   }
 
-  // Burst + light
   updateBurst();drawBurst();
   drawLight();
 
-  // Schedule first leaf once tree is visible
-  if(!firstLeafScheduled && bp>0.62 && leaves.length>0 && PHOTOS.length>0){
-    firstLeafScheduled=true;
-    setTimeout(scheduleNext,700);
+  if(!firstLeaf&&bp>0.60&&leaves.length>0&&PHOTOS.length>0){
+    firstLeaf=true;setTimeout(scheduleNext,600);
   }
 }
 animate();
 
-// Click leaf → full screen photo
 canvas.addEventListener('click',function(e){
   var mx=e.clientX,my=e.clientY;
   for(var i=0;i<leaves.length;i++){
     var lf=leaves[i];
-    var dx=mx-lf.cx,dy=my-lf.cy;
-    if(Math.sqrt(dx*dx+dy*dy)<lf.size*3){
-      var p=photoQueue[(qIdx+i)%photoQueue.length];
-      document.getElementById('modalImg').src=PHOTOS[p];
+    if(Math.sqrt((mx-lf.cx)*(mx-lf.cx)+(my-lf.cy)*(my-lf.cy))<lf.size*3.2){
+      document.getElementById('modalImg').src=PHOTOS[pQueue[(qIdx+i)%pQueue.length]];
       document.getElementById('photoModal').classList.add('show');
       break;
     }
   }
 });
 
-} catch(err) {
+}catch(err){
   var b=document.body;
   b.style.cssText='background:#0a0008;color:#f48fb1;display:flex;align-items:center;justify-content:center;height:100vh;font-family:serif;text-align:center;padding:2rem;flex-direction:column;gap:1rem;';
-  b.innerHTML='<div style="font-size:2rem">🌹</div><div>'+err.message+'</div>';
+  b.innerHTML='<div style="font-size:2rem">\u{1F339}</div><div>'+err.message+'</div>';
 }
 })();
 </script>
